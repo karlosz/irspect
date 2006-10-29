@@ -122,18 +122,18 @@
 	 (make-pathname :type "heap" :defaults (quicksave-pathname))))
   (com-show-components))
 
-(define-presentation-type component ())
-(define-presentation-type cblock ())
-(define-presentation-type node ())
-(define-presentation-type lvar ())
+(define-presentation-type inspectable-object ())
+(define-presentation-type component () :inherit-from 'inspectable-object)
+(define-presentation-type cblock () :inherit-from 'inspectable-object)
+(define-presentation-type node () :inherit-from 'inspectable-object)
+(define-presentation-type lvar () :inherit-from 'inspectable-object)
 
 (define-presentation-method present (object (type component) stream view &key)
   (declare (ignore view))
   (with-text-family (stream :sans-serif)
-    (princ "<component " stream)
+    (princ "component " stream)
     (with-text-face (stream :italic)
-      (princ (sb-c::component-name object) stream))
-    (princ ">" stream)))
+      (princ (sb-c::component-name object) stream))))
 
 (define-presentation-method present (object (type cblock) stream view &key)
   (declare (ignore view))
@@ -148,79 +148,114 @@
     (with-text-face (stream :italic)
       (princ (sb-c::block-number object) stream))))
 
+(defmacro with-node ((name node) &body body)
+  `(invoke-with-node (lambda () ,@body) ,name ,node))
+
+(defun invoke-with-node (fn name node)
+  (with-text-family (t :sans-serif)
+    (with-text-size (t :small)
+      (format t "(~D) " (sb-c::cont-num node)))
+    (princ name)
+    (princ " ")
+    (with-text-face (t :italic)
+      (funcall fn))))
+
+(defun present-leaf (x)
+  (with-output-as-presentation (t x 'inspectable-object)
+    (let ((str (with-output-to-string (s) (sb-c::print-leaf x s))))
+      (if (>= (length str) 20)
+	  (format t "~A..." (substitute #\space #\newline (subseq str 0 20)))
+	  (write-string str)))))
+
+(defgeneric present-node (ctran node))
+
+(defmethod present-node (ctran (node sb-c::ref))
+  (with-node ("ref" ctran)
+    (present-leaf (sb-c::ref-leaf node))))
+
+(defmethod present-node (ctran (node sb-c::cif))
+  (with-node ("if" ctran)
+    (present (sb-c::if-test node) 'lvar)))
+
+(defmethod present-node (ctran (node sb-c::entry))
+  (let ((cleanup (sb-c::entry-cleanup node)))
+    (if (eq (sb-c::cleanup-kind cleanup) :dynamic-extent)
+	(with-node ("entry DX" ctran)
+	  (present (sb-c::cleanup-info cleanup) 'inspectable-object))
+	(with-node ("entry" ctran)
+	  (when (sb-c::entry-exits node)
+	    (present (sb-c::entry-exits node) 'inspectable-object))))))
+
+(defmethod present-node (ctran (node sb-c::bind))
+  (with-node ("bind" ctran)
+    (present-leaf (sb-c::bind-lambda node))
+    (when (sb-c::functional-kind (sb-c::bind-lambda node))
+      (format t " ~S ~S"
+	      :kind
+	      (sb-c::functional-kind (sb-c::bind-lambda node))))))
+
+(defmethod present-node (ctran (node sb-c::basic-combination))
+  (let ((kind (sb-c::basic-combination-kind node)))
+    (with-node ((format nil "~(~A~A ~A~) "
+			(if (sb-c::node-tail-p node) "tail " "")
+			kind
+			(type-of node))
+		ctran)
+      (present (sb-c::basic-combination-fun node) 'lvar)
+      (dolist (arg (sb-c::basic-combination-args node))
+	(princ " ")
+	(if arg
+	    (present arg 'lvar)
+	    (format t "<none> "))))))
+
+(defmethod present-node (ctran (node sb-c::creturn))
+  (with-node ("return" ctran)
+    (present (sb-c::return-result node) 'lvar)
+    (princ " ")
+    (present-leaf (sb-c::return-lambda node))))
+
+(defmethod present-node (ctran (node sb-c::cset))
+  (with-node ("set" ctran)
+    (present-leaf (sb-c::set-var node))
+    (princ " ")
+    (present (sb-c::set-value node) 'lvar)))
+
+(defmethod present-node (ctran (node sb-c::exit))
+  (let ((value (sb-c::exit-value node)))
+    (cond
+      (value
+	(with-node ("exit" ctran)
+	  (present value 'lvar)))
+      ((sb-c::exit-entry node)
+	(with-node ("exit <no value>" ctran)))
+      (t
+	(with-node ("exit <degenerate>" ctran))))))
+
+(defmethod present-node (ctran (node sb-c::cast))
+  (with-node ("cast" ctran)
+    (present (sb-c::cast-value node) 'lvar)
+    (format t " ~A[~S -> ~S]"
+	    (if (sb-c::cast-%type-check node) #\+ #\-)
+	    (sb-c::cast-type-to-check node)
+	    (sb-c::cast-asserted-type node))))
+
+(defmethod present-node (ctran (node t))
+  (with-node ("unknown node" ctran)
+    (princ node)))
+
 (define-presentation-method present (object (type node) stream view &key)
   (declare (ignore view))
-  (with-text-family (stream :sans-serif)
-    (princ "ctran " stream)
-    (with-text-face (stream :italic)
-      (princ (sb-c::cont-num object) stream))
-    (princ " " stream)
-    (let ((node (sb-c::ctran-next object)))
-      (etypecase node
-	(sb-c::ref (sb-c::print-leaf (sb-c::ref-leaf node)))
-	(sb-c::basic-combination
-	  (let ((kind (sb-c::basic-combination-kind node)))
-	    (format t "~(~A~A ~A~) "
-		    (if (sb-c::node-tail-p node) "tail " "")
-		    kind
-		    (type-of node))
-	    (sb-c::print-lvar (sb-c::basic-combination-fun node))
-	    (dolist (arg (sb-c::basic-combination-args node))
-	      (if arg
-		  (sb-c::print-lvar arg)
-		  (format t "<none> ")))))
-	(sb-c::cset
-	  (write-string "set ")
-	  (sb-c::print-leaf (sb-c::set-var node))
-	  (write-char #\space)
-	  (sb-c::print-lvar (sb-c::set-value node)))
-	(sb-c::cif
-	  (write-string "if ")
-	  (sb-c::print-lvar (sb-c::if-test node))
-	  (sb-c::print-ctran (sb-c::block-start (sb-c::if-consequent node)))
-	  (sb-c::print-ctran (sb-c::block-start (sb-c::if-alternative node))))
-	(sb-c::bind
-	  (write-string "bind ")
-	  (sb-c::print-leaf (sb-c::bind-lambda node))
-	  (when (sb-c::functional-kind (sb-c::bind-lambda node))
-	    (format t " ~S ~S"
-		    :kind
-		    (sb-c::functional-kind (sb-c::bind-lambda node)))))
-	(sb-c::creturn
-	  (write-string "return ")
-	  (sb-c::print-lvar (sb-c::return-result node))
-	  (sb-c::print-leaf (sb-c::return-lambda node)))
-	(sb-c::entry
-	  (let ((cleanup (sb-c::entry-cleanup node)))
-	    (case (sb-c::cleanup-kind cleanup)
-	      ((:dynamic-extent)
-		(format t "entry DX~{ v~D~}"
-			(mapcar #'sb-c::cont-num (sb-c::cleanup-info cleanup))))
-	      (t
-		(format t "entry ~S" (sb-c::entry-exits node))))))
-	(sb-c::exit
-	  (let ((value (sb-c::exit-value node)))
-	    (cond (value
-		    (format t "exit ")
-		    (sb-c::print-lvar value))
-	      ((sb-c::exit-entry node)
-		(format t "exit <no value>"))
-	      (t
-		(format t "exit <degenerate>")))))
-	(sb-c::cast
-	  (let ((value (sb-c::cast-value node)))
-	    (format t "cast v~D ~A[~S -> ~S]" (sb-c::cont-num value)
-		    (if (sb-c::cast-%type-check node) #\+ #\-)
-		    (sb-c::cast-type-to-check node)
-		    (sb-c::cast-asserted-type node))))))))
-
+  (let ((*standard-output* stream))
+    (surrounding-output-with-border (t :shape :rectangle)
+      (present-node object (sb-c::ctran-next object)))))
 
 (define-presentation-method present (object (type lvar) stream view &key)
   (declare (ignore view))
   (with-text-family (stream :sans-serif)
     (princ "lvar " stream)
-    (with-text-face (stream :italic)
-      (princ (sb-c::cont-num object) stream))))
+    (with-text-family (stream :sans-serif)
+      (with-text-face (stream :italic)
+	(princ (sb-c::cont-num object) stream)))))
 
 (defun tabs (tab-layout)
   (mapcar #'tab-layout::tab-pane-pane
@@ -272,16 +307,20 @@
        (sb-c::ctran
 	 (present object 'node :stream stream))
        (sb-c::lvar
-	 (present object 'lvar :stream stream))))
+	 (present object 'lvar :stream stream))
+       ((eql :empty-block)
+	 (with-text-face (t :italic)
+	   (princ "empty block")))))
    (lambda (x)
      (etypecase x
        (sb-c::cblock
 	 (when (find x (sb-c::block-pred block))
-	   (list (sb-c::block-start block))))
+	   (list (or (sb-c::block-start block) :empty-block))))
        (sb-c::ctran
 	 (let* ((node (sb-c::ctran-next x))
 		(next (sb-c::node-next node))
-		(lvar (and (sb-c::valued-node-p node) (sb-c::node-lvar node))))
+		(lvar (and (sb-c::valued-node-p node)
+			   (sb-c::node-lvar node))))
 	   (append (if next
 		       (list next)
 		       (sb-c::block-succ block))
@@ -289,13 +328,16 @@
        (sb-c::lvar
 	 (let ((y (sb-c::node-prev (sb-c::lvar-dest x))))
 	   (when y
-	     (list y))))))
+	     (list y))))
+       ((eql :empty-block)
+	 (sb-c::block-succ block))))
    :arc-drawer (lambda (stream from-object to-object x1 y1 x2 y2
 			&rest drawing-options)
 		 (if (or (typep (graph-node-object from-object) 'sb-c::lvar)
 			 (typep (graph-node-object to-object) 'sb-c::lvar))
 		     (draw-arrow* stream x1 y1 x2 y2 :line-dashes #(1.0 2.0))
-		     (apply #'draw-arrow* stream x1 y1 x2 y2 drawing-options)))
+		     (apply #'draw-arrow* stream x1 y1 x2 y2
+			    drawing-options)))
    :graph-type :tree
    :orientation :vertical
    :merge-duplicates t)
@@ -340,9 +382,13 @@
     (fresh-line)
     (format-nodes b)))
 
-(define-irspect-command com-inspect-component
-    ((component 'component :gesture :menu))
-  (clouseau:inspector component))
+(define-irspect-command com-inspect-object
+    ((object 'inspectable-object :gesture :menu))
+  (clouseau:inspector object))
+
+(define-irspect-command com-select-default
+    ((object 'inspectable-object :gesture :select))
+  (clouseau:inspector object))
 
 (define-irspect-command (com-clear :name t) ()
   (window-clear (knopf interactor)))
