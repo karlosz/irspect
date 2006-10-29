@@ -125,6 +125,7 @@
 
 (define-presentation-type component ())
 (define-presentation-type cblock ())
+(define-presentation-type node ())
 
 (define-presentation-method present (object (type component) stream view &key)
   (declare (ignore view))
@@ -137,10 +138,15 @@
 (define-presentation-method present (object (type cblock) stream view &key)
   (declare (ignore view))
   (with-text-family (stream :sans-serif)
-    (princ "<cblock " stream)
+    (cond
+      ((eq object (sb-c::component-head (sb-c::block-component object)))
+	(princ "head " stream))
+      ((eq object (sb-c::component-tail (sb-c::block-component object)))
+	(princ "tail " stream))
+      (t
+	(princ "cblock " stream))) 
     (with-text-face (stream :italic)
-      (princ (sb-c::block-number object) stream))
-    (princ ">" stream)))
+      (princ (sb-c::block-number object) stream))))
 
 (define-irspect-command (com-show-components :name t) ()
   (let ((*standard-output* (knopf interactor)))
@@ -166,6 +172,27 @@
    (lambda (object stream)
      (present object 'cblock :stream stream))
    #'sb-c::block-succ
+   :arc-drawer #'draw-arrow-arc
+   :graph-type :tree
+   :orientation :vertical
+   :merge-duplicates t)
+  (fresh-line))
+
+(defun format-nodes (block ctrans)
+  (format-graph-from-roots 
+   (append (sb-c::block-pred block) (list (sb-c::block-start block)))
+   (lambda (object stream)
+     (if (typep object 'sb-c::cblock)
+	 (present object 'cblock :stream stream)
+	 (present object 'node :stream stream)))
+   (lambda (x)
+     (if (typep x 'sb-c::cblock)
+	 (when (find x (sb-c::block-pred block))
+	   (list (sb-c::block-start block)))
+	 (let ((next (sb-c::node-next (sb-c::ctran-next x))))
+	   (if next
+	       (list next)
+	       (sb-c::block-succ block)))))
    :arc-drawer #'draw-arrow-arc
    :graph-type :tree
    :orientation :vertical
@@ -204,6 +231,18 @@
 		 (roots (remove-if #'sb-c::block-pred web)))
 	    (format-blocks roots)
 	    (setf blocks (set-difference blocks web))))))
+
+(define-irspect-command com-show-block
+    ((b 'cblock :gesture :select))
+  (let ((*standard-output* (knopf interactor))
+	(ctrans
+	 (loop
+	     for ctran = (sb-c::block-start b)
+	     then (sb-c::node-next (sb-c::ctran-next ctran))
+	     while ctran
+	     collect ctran)))
+    (fresh-line)
+    (format-nodes b ctrans)))
 
 (define-irspect-command com-inspect-component
     ((component 'component :gesture :menu))
