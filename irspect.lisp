@@ -384,11 +384,11 @@
 
 (define-irspect-command com-inspect-object
     ((object 'inspectable-object :gesture :menu))
-  (clouseau:inspector object))
+  (clouseau:inspector object :new-process t))
 
 (define-irspect-command com-select-default
     ((object 'inspectable-object :gesture :select))
-  (clouseau:inspector object))
+  (clouseau:inspector object :new-process t))
 
 (define-irspect-command (com-clear :name t) ()
   (window-clear (knopf interactor)))
