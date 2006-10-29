@@ -6,7 +6,7 @@
   (:pointer-documentation t)
   (:menu-bar menubar-command-table)
   (:panes
-    (interactor :interactor)
+    (interactor :interactor :scroll-bars t)
     (source :drei :syntax :lisp))
   (:layouts
     (default
@@ -134,13 +134,6 @@
 		(print c)))
 	(format t "No components compiled yet.~%"))))
 
-;; "be careful not to fly into space on weird successors" says debug-dump.lisp
-(defun block-successors (block)
-  (let* ((tail (sb-c::component-tail (sb-c::block-component block)))
-	 (succ (sb-c::block-succ block)))
-    (unless (and succ (eq (car succ) tail))
-      succ)))
-
 (defun draw-arrow-arc
     (stream from-object to-object x1 y1 x2 y2 &rest drawing-options)
   (declare (ignore from-object to-object))
@@ -150,7 +143,7 @@
   (format-graph-from-roots 
    blocks
    #'print-object
-   #'block-successors
+   #'sb-c::block-succ
    :arc-drawer #'draw-arrow-arc
    :graph-type :tree
    :orientation :vertical
@@ -173,23 +166,20 @@
 (define-irspect-command com-show-component
     ((component 'component :gesture :select))
   (let ((*standard-output* (knopf interactor))
-	(blocks '())
-	(preds (make-hash-table)))
+	(blocks '()))
     (fresh-line)
     (format t "Blocks in components ~A:~%~%" component)
     (sb-c::do-blocks (block component)
-      (push block blocks)
-      (dolist (succ (block-successors block))
-	(push block (gethash succ preds))))
+      (push block blocks))
     (loop
 	for block = (pop blocks)
 	while block
 	do
 	  (let* ((web (closure block
 			       (lambda (x)
-				 (union (block-successors x)
-					(gethash x preds)))))
-		 (roots (remove-if (lambda (x) (gethash x preds)) web)))
+				 (union (sb-c::block-succ x)
+					(sb-c::block-pred x)))))
+		 (roots (remove-if #'sb-c::block-pred web)))
 	    (format-blocks roots)
 	    (setf blocks (set-difference blocks web))))))
 
