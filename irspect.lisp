@@ -9,10 +9,9 @@
     (source :drei :syntax :lisp))
   (:layouts
     (default
-      (vertically ()
-        source
-	(make-pane 'clim-extensions:box-adjuster-gadget)
-	interactor)))
+      (tab-layout:with-tab-layout ('pane :name 'tabs)
+	("Source" source 'pane)
+	("IR" interactor 'pane))))
   (:top-level (toplevel)))
 
 (define-symbol-macro <frame> *application-frame*)
@@ -223,7 +222,15 @@
     (with-text-face (stream :italic)
       (princ (sb-c::cont-num object) stream))))
 
+(defun tabs (tab-layout)
+  (mapcar #'tab-layout::tab-pane-pane
+	  (tab-layout::tab-panes-of-tab-layout tab-layout)))
+
+(defun switch-to-tab (tab)
+  (tab-layout:switch-to-pane tab 'tab-layout:tab-layout-pane))
+
 (define-irspect-command (com-show-components :name t) ()
+  (switch-to-tab (second (tabs (knopf tabs))))
   (let ((*standard-output* (knopf interactor)))
     (fresh-line)
     (if (components <frame>)
