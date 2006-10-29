@@ -327,8 +327,10 @@
 		   (when lvar (list lvar)))))
        (sb-c::lvar
 	 (let ((y (sb-c::node-prev (sb-c::lvar-dest x))))
-	   (when (and y (eq (sb-c::ctran-block y) block))
-	     (list y))))
+	   (when y
+	     (if (eq (sb-c::ctran-block y) block)
+		 (list y)
+		 (list (sb-c::ctran-block y))))))
        ((eql :empty-block)
 	 (sb-c::block-succ block))))
    :arc-drawer (lambda (stream from-object to-object x1 y1 x2 y2
