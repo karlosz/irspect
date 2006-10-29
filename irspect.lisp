@@ -120,6 +120,23 @@
     (com-show-components)))
 
 (define-presentation-type component ())
+(define-presentation-type cblock ())
+
+(define-presentation-method present (object (type component) stream view &key)
+  (declare (ignore view))
+  (with-text-family (stream :sans-serif)
+    (princ "<component " stream)
+    (with-text-face (stream :italic)
+      (princ (sb-c::component-name object) stream))
+    (princ ">" stream)))
+
+(define-presentation-method present (object (type cblock) stream view &key)
+  (declare (ignore view))
+  (with-text-family (stream :sans-serif)
+    (princ "<cblock " stream)
+    (with-text-face (stream :italic)
+      (princ (sb-c::block-number object) stream))
+    (princ ">" stream)))
 
 (define-irspect-command (com-show-components :name t) ()
   (let ((*standard-output* (knopf interactor)))
@@ -130,8 +147,8 @@
 	    for cx being the hash-values in (components <frame>)
 	    for c = (car cx)
 	    do
-	      (with-output-as-presentation (t c 'component)
-		(print c)))
+	      (present c 'component)
+	      (fresh-line))
 	(format t "No components compiled yet.~%"))))
 
 (defun draw-arrow-arc
@@ -142,7 +159,8 @@
 (defun format-blocks (blocks)
   (format-graph-from-roots 
    blocks
-   #'print-object
+   (lambda (object stream)
+     (present object 'cblock :stream stream))
    #'sb-c::block-succ
    :arc-drawer #'draw-arrow-arc
    :graph-type :tree
