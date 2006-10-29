@@ -1,0 +1,219 @@
+(in-package :irspect)
+
+(define-application-frame irspect ()
+    ((source-pathname :initarg :source-pathname :accessor source-pathname)
+     (components :initform nil :accessor components))
+  (:pointer-documentation t)
+  (:menu-bar menubar-command-table)
+  (:panes
+    (interactor :interactor)
+    (source :drei :syntax :lisp))
+  (:layouts
+    (default
+      (vertically ()
+        source
+	(make-pane 'clim-extensions:box-adjuster-gadget)
+	interactor)))
+  (:top-level (toplevel)))
+
+(define-symbol-macro <frame> *application-frame*)
+
+(defmacro knopf (name)
+  `(find-pane-named <frame> ',name))
+
+(defun slurp (pathname)
+  (with-output-to-string (out)
+    (with-open-file (in pathname)
+      (loop
+	  for l = (read-line in nil)
+	  while l
+	  do (write-line l out)))))
+
+(defun toplevel (frame)
+  (com-load-original)
+  (default-frame-top-level frame))
+
+(make-command-table
+ 'menubar-command-table
+ :errorp nil
+ :menu '(("File" :menu file-command-table)
+	 ("View" :menu view-command-table)))
+
+(make-command-table
+ 'file-command-table
+ :errorp nil
+ :menu '(("Load Original" :command com-load-original)
+	 ("Quicksave" :command com-quicksave)
+	 ("Load Quicksave" :command com-load-quicksave)
+	 ("Compile" :command com-compile)
+	 ("Quit" :command com-quit)))
+
+(make-command-table
+ 'view-command-table
+ :errorp nil
+ :menu '(("Show Components" :command com-show-components)
+	 ("Clear" :command com-clear)))
+
+(define-irspect-command (com-quit :name t) ()
+  (frame-exit <frame>))
+
+(define-irspect-command (com-quicksave :name t) ()
+  (let ((p (merge-pathnames ".irspect.lisp" (user-homedir-pathname))))
+    (with-open-file (s p :direction :output :if-exists :rename-and-delete)
+      (write-string (gadget-value (knopf source)) s))
+    (format t "Source saved to ~A." p)
+    p))
+
+(define-irspect-command (com-load-quicksave :name t) ()
+  (let ((p (merge-pathnames ".irspect.lisp" (user-homedir-pathname))))
+    (setf (gadget-value (knopf source)) (slurp p))))
+
+(define-irspect-command (com-load-original :name t) ()
+  (when (source-pathname <frame>)
+    (setf (gadget-value (knopf source)) (slurp (source-pathname <frame>)))))
+
+(defmacro with-wrapper ((pathname name) &body body)
+  `(invoke-with-wrapper (lambda () ,@body) ,pathname ,name))
+
+(defvar *components-being-dumped*)
+
+(defun invoke-with-wrapper (body pathname name)
+  (sb-ext:without-package-locks
+   (let ((orig (fdefinition name)))
+     (unwind-protect
+	 (progn
+	   (setf (fdefinition name)
+		 (lambda (component &rest args)
+		   (apply orig component args)
+		   (let ((id (gethash component *components-being-dumped*)))
+		     (unless id
+		       (setf id (hash-table-count *components-being-dumped*))
+		       (setf (gethash component *components-being-dumped*) id))
+		     (sb-heapdump:dump-object (cons id component)
+					      pathname
+					      :if-exists :append
+					      :initializer 'fetch-component))))
+	   (funcall body))
+       (setf (fdefinition name) orig)))))
+
+(defvar *heap-file-components*)
+
+(defun fetch-component (x)
+  (push (cdr x) (gethash (car x) *heap-file-components*)))
+
+(defun load-components (pathname)
+  (let ((*heap-file-components* (make-hash-table)))
+    (sb-heapdump:load-dumpfile pathname)
+    *heap-file-components*))
+
+(define-irspect-command (com-compile :name t) ()
+  (let* ((p (com-quicksave))
+	 (q (make-pathname :type "trace" :defaults p))
+	 (r (make-pathname :type "heap" :defaults p))
+	 (*standard-output* (knopf interactor))
+	 (*components-being-dumped* (make-hash-table)))
+    (when (probe-file r)
+      (delete-file r))
+    (with-wrapper (r 'sb-c::describe-component)
+      (compile-file p :trace-file q))
+    (setf (components <frame>) (load-components r))
+    (com-show-components)))
+
+(define-presentation-type component ())
+
+(define-irspect-command (com-show-components :name t) ()
+  (let ((*standard-output* (knopf interactor)))
+    (fresh-line)
+    (if (components <frame>)
+	(loop
+	    initially (format t "Components available for inspection:~%")
+	    for cx being the hash-values in (components <frame>)
+	    for c = (car cx)
+	    do
+	      (with-output-as-presentation (t c 'component)
+		(print c)))
+	(format t "No components compiled yet.~%"))))
+
+;; "be careful not to fly into space on weird successors" says debug-dump.lisp
+(defun block-successors (block)
+  (let* ((tail (sb-c::component-tail (sb-c::block-component block)))
+	 (succ (sb-c::block-succ block)))
+    (unless (and succ (eq (car succ) tail))
+      succ)))
+
+(defun draw-arrow-arc
+    (stream from-object to-object x1 y1 x2 y2 &rest drawing-options)
+  (declare (ignore from-object to-object))
+  (apply #'draw-arrow* stream x1 y1 x2 y2 drawing-options))
+
+(defun format-blocks (blocks)
+  (format-graph-from-roots 
+   blocks
+   #'print-object
+   #'block-successors
+   :arc-drawer #'draw-arrow-arc
+   :graph-type :tree
+   :orientation :vertical
+   :merge-duplicates t)
+  (fresh-line))
+
+(defun closure (thing fn)
+  (let ((things '())
+	(worklist (list thing)))
+    (loop
+	for x = (pop worklist)
+	while x
+	do
+	  (push x things)
+	  (dolist (next (funcall fn x))
+	    (unless (find next things)
+	      (pushnew next worklist))))
+    things))
+
+(define-irspect-command com-show-component
+    ((component 'component :gesture :select))
+  (let ((*standard-output* (knopf interactor))
+	(blocks '())
+	(preds (make-hash-table)))
+    (fresh-line)
+    (format t "Blocks in components ~A:~%~%" component)
+    (sb-c::do-blocks (block component)
+      (push block blocks)
+      (dolist (succ (block-successors block))
+	(push block (gethash succ preds))))
+    (loop
+	for block = (pop blocks)
+	while block
+	do
+	  (let* ((web (closure block
+			       (lambda (x)
+				 (union (block-successors x)
+					(gethash x preds)))))
+		 (roots (remove-if (lambda (x) (gethash x preds)) web)))
+	    (format-blocks roots)
+	    (setf blocks (set-difference blocks web))))))
+
+(define-irspect-command com-inspect-component
+    ((component 'component :gesture :menu))
+  (clouseau:inspector component))
+
+(define-irspect-command (com-clear :name t) ()
+  (window-clear (knopf interactor)))
+
+(defun irspect
+    (&rest args &key width height background source-pathname &allow-other-keys)
+  (if background
+      (clim-sys:make-process
+       (lambda ()
+	 (apply #'irspect :background nil args)))
+      (run-frame-top-level
+       (apply #'make-application-frame
+	      'irspect
+	      :allow-other-keys t
+	      :source-pathname (or source-pathname nil)
+	      :width (or width 800)
+	      :height (or height 600)
+	      args))))
+
+#+(or)
+(irspect:irspect)
