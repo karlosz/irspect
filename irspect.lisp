@@ -1,8 +1,7 @@
 (in-package :irspect)
 
 (define-application-frame irspect ()
-    ((source-pathname :initarg :source-pathname :accessor source-pathname)
-     (components :initform nil :accessor components))
+    ((components :initform nil :accessor components))
   (:pointer-documentation t)
   (:menu-bar menubar-command-table)
   (:panes
@@ -30,7 +29,7 @@
 	  do (write-line l out)))))
 
 (defun toplevel (frame)
-  (com-load-original)
+  (com-load-quicksave)
   (default-frame-top-level frame))
 
 (make-command-table
@@ -42,10 +41,10 @@
 (make-command-table
  'file-command-table
  :errorp nil
- :menu '(("Load Original" :command com-load-original)
-	 ("Quicksave" :command com-quicksave)
+ :menu '(("Quicksave" :command com-quicksave)
 	 ("Load Quicksave" :command com-load-quicksave)
 	 ("Compile" :command com-compile)
+	 ("Load Heap" :command com-load-heap)
 	 ("Quit" :command com-quit)))
 
 (make-command-table
@@ -57,20 +56,19 @@
 (define-irspect-command (com-quit :name t) ()
   (frame-exit <frame>))
 
+(defun quicksave-pathname ()
+  (merge-pathnames ".irspect.lisp" (user-homedir-pathname)))
+
 (define-irspect-command (com-quicksave :name t) ()
-  (let ((p (merge-pathnames ".irspect.lisp" (user-homedir-pathname))))
+  (let ((p (quicksave-pathname)))
     (with-open-file (s p :direction :output :if-exists :rename-and-delete)
       (write-string (gadget-value (knopf source)) s))
-    (format t "Source saved to ~A." p)
-    p))
+    (format t "Source saved to ~A." p)))
 
 (define-irspect-command (com-load-quicksave :name t) ()
   (let ((p (merge-pathnames ".irspect.lisp" (user-homedir-pathname))))
-    (setf (gadget-value (knopf source)) (slurp p))))
-
-(define-irspect-command (com-load-original :name t) ()
-  (when (source-pathname <frame>)
-    (setf (gadget-value (knopf source)) (slurp (source-pathname <frame>)))))
+    (when (probe-file p)
+      (setf (gadget-value (knopf source)) (slurp p)))))
 
 (defmacro with-wrapper ((pathname name) &body body)
   `(invoke-with-wrapper (lambda () ,@body) ,pathname ,name))
@@ -107,7 +105,8 @@
     *heap-file-components*))
 
 (define-irspect-command (com-compile :name t) ()
-  (let* ((p (com-quicksave))
+  (com-quicksave)
+  (let* ((p (quicksave-pathname))
 	 (q (make-pathname :type "trace" :defaults p))
 	 (r (make-pathname :type "heap" :defaults p))
 	 (*standard-output* (knopf interactor))
@@ -116,8 +115,13 @@
       (delete-file r))
     (with-wrapper (r 'sb-c::describe-component)
       (compile-file p :trace-file q))
-    (setf (components <frame>) (load-components r))
-    (com-show-components)))
+    (com-load-heap)))
+
+(define-irspect-command (com-load-heap :name t) ()
+  (setf (components <frame>)
+	(load-components
+	 (make-pathname :type "heap" :defaults (quicksave-pathname))))
+  (com-show-components))
 
 (define-presentation-type component ())
 (define-presentation-type cblock ())
@@ -208,8 +212,7 @@
 (define-irspect-command (com-clear :name t) ()
   (window-clear (knopf interactor)))
 
-(defun irspect
-    (&rest args &key width height background source-pathname &allow-other-keys)
+(defun irspect (&rest args &key width height background &allow-other-keys)
   (if background
       (clim-sys:make-process
        (lambda ()
@@ -218,7 +221,6 @@
        (apply #'make-application-frame
 	      'irspect
 	      :allow-other-keys t
-	      :source-pathname (or source-pathname nil)
 	      :width (or width 800)
 	      :height (or height 600)
 	      args))))
