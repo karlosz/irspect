@@ -327,7 +327,7 @@
 		   (when lvar (list lvar)))))
        (sb-c::lvar
 	 (let ((y (sb-c::node-prev (sb-c::lvar-dest x))))
-	   (when y
+	   (when (and y (eq (sb-c::ctran-block y) block))
 	     (list y))))
        ((eql :empty-block)
 	 (sb-c::block-succ block))))
