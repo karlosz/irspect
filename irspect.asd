@@ -4,7 +4,7 @@
 
 (asdf:defsystem :irspect
     :serial t
-    :depends-on (:mcclim :clouseau :tab-layout)
+    :depends-on (:mcclim :clouseau)
     :components
     ((:file "package")
      (:file "irspect")))

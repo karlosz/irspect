@@ -1,0 +1,40 @@
+
+Installation
+============
+
+Load through asdf.  Requires McCLIM and Clouseau.
+
+
+Usage
+=====
+
+Start with (irspect:irspect).
+
+1. Enter something into the text editor, for example:
+
+  (defun schleife (n)
+    (loop for i from 0 below n
+          collect i))
+
+  Use File -> Quicksave to save the buffer into ~/.irspect.lisp.  This
+  file be read on startup automatically.
+
+
+2. Compile the code using File -> Compile.
+
+   When sb-heapdump support is enabled, this command will create a file
+   ~/.irspect.heap that can be loaded later.
+
+   Without sb-heapdump, the intermediate representation is just stored
+   in a global variable.
+
+
+3. (Optional.) Use File -> Load Heap to display the contents of
+   ~/.irspect.heap (or the components of the previous compilation if
+   irspect was compiled without sb-heapdump support).
+
+4. You should now see a list of components that are available for
+   inspecting.
+
+     - Select a component to display its blocks.
+     - Select a block to display its nodes.

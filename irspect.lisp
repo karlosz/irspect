@@ -9,9 +9,9 @@
     (source :drei :syntax :lisp))
   (:layouts
     (default
-      (tab-layout:with-tab-layout ('pane :name 'tabs)
-	("Source" source 'pane)
-	("IR" interactor 'pane))))
+      (clim-tab-layout:with-tab-layout ('clim-tab-layout:tab-page :name 'tabs)
+	("Source" source)
+	("IR" interactor))))
   (:top-level (toplevel)))
 
 (define-symbol-macro <frame> *application-frame*)
@@ -74,9 +74,16 @@
 
 (defvar *components-being-dumped*)
 
+(defvar *heap-file-components*)
+
 (defun invoke-with-wrapper (body pathname name)
   (sb-ext:without-package-locks
    (let ((orig (fdefinition name)))
+     #-sb-heapdump
+     (progn
+       (setf *heap-file-components* (make-hash-table))
+       (format *standard-input*
+	       "No sb-heapdump support, saving components into variable.~%"))
      (unwind-protect
 	 (progn
 	   (setf (fdefinition name)
@@ -86,6 +93,9 @@
 		     (unless id
 		       (setf id (hash-table-count *components-being-dumped*))
 		       (setf (gethash component *components-being-dumped*) id))
+		     #-sb-heapdump
+		     (push component (gethash id *heap-file-components*))
+		     #+sb-heapdump
 		     (sb-heapdump:dump-object (cons id component)
 					      pathname
 					      :if-exists :append
@@ -93,12 +103,16 @@
 	   (funcall body))
        (setf (fdefinition name) orig)))))
 
-(defvar *heap-file-components*)
-
 (defun fetch-component (x)
   (push (cdr x) (gethash (car x) *heap-file-components*)))
 
 (defun load-components (pathname)
+  #-sb-heapdump
+  (progn
+    (format *standard-input*
+	    "No sb-heapdump support, using components from variable.~%")
+    *heap-file-components*)
+  #+sb-heapdump
   (let ((*heap-file-components* (make-hash-table)))
     (sb-heapdump:load-dumpfile pathname)
     *heap-file-components*))
@@ -257,15 +271,9 @@
       (with-text-face (stream :italic)
 	(princ (sb-c::cont-num object) stream)))))
 
-(defun tabs (tab-layout)
-  (mapcar #'tab-layout::tab-pane-pane
-	  (tab-layout::tab-panes-of-tab-layout tab-layout)))
-
-(defun switch-to-tab (tab)
-  (tab-layout:switch-to-pane tab 'tab-layout:tab-layout-pane))
-
 (define-irspect-command (com-show-components :name t) ()
-  (switch-to-tab (second (tabs (knopf tabs))))
+  (clim-tab-layout:switch-to-page
+   (second (clim-tab-layout:tab-layout-pages (knopf tabs))))
   (let ((*standard-output* (knopf interactor)))
     (fresh-line)
     (if (components <frame>)
