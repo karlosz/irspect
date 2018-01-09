@@ -79,30 +79,30 @@
 
 (defun invoke-with-wrapper (body pathname name)
   (sb-ext:without-package-locks
-   (let ((orig (fdefinition name)))
-     #-sb-heapdump
-     (progn
-       (setf *heap-file-components* (make-hash-table))
-       (format *standard-input*
-	       "No sb-heapdump support, saving components into variable.~%"))
-     (unwind-protect
-	 (progn
-	   (setf (fdefinition name)
-		 (lambda (component &rest args)
-		   (apply orig component args)
-		   (let ((id (gethash component *components-being-dumped*)))
-		     (unless id
-		       (setf id (hash-table-count *components-being-dumped*))
-		       (setf (gethash component *components-being-dumped*) id))
-		     #-sb-heapdump
-		     (push component (gethash id *heap-file-components*))
-		     #+sb-heapdump
-		     (sb-heapdump:dump-object (cons id component)
-					      pathname
-					      :if-exists :append
-					      :initializer 'fetch-component))))
-	   (funcall body))
-       (setf (fdefinition name) orig)))))
+    (let ((orig (fdefinition name)))
+      #-sb-heapdump
+      (progn
+        (setf *heap-file-components* (make-hash-table))
+        (format *standard-input*
+                "No sb-heapdump support, saving components into variable.~%"))
+      (unwind-protect
+           (progn
+             (setf (fdefinition name)
+                   (lambda (component &rest args)
+                     (apply orig component args)
+                     (let ((id (gethash component *components-being-dumped*)))
+                       (unless id
+                         (setf id (hash-table-count *components-being-dumped*))
+                         (setf (gethash component *components-being-dumped*) id))
+                       #-sb-heapdump
+                       (push component (gethash id *heap-file-components*))
+                       #+sb-heapdump
+                       (sb-heapdump:dump-object (cons id component)
+                                                pathname
+                                                :if-exists :append
+                                                :initializer 'fetch-component))))
+             (funcall body))
+        (setf (fdefinition name) orig)))))
 
 (defun fetch-component (x)
   (push (cdr x) (gethash (car x) *heap-file-components*)))
@@ -270,7 +270,7 @@
     (princ "lvar " stream)
     (with-text-family (stream :sans-serif)
       (with-text-face (stream :italic)
-	(princ (sb-c::cont-num object) stream)))))
+        (princ (sb-c::cont-num object) stream)))))
 
 (define-irspect-command (com-show-components :name t) ()
   (clim-tab-layout:switch-to-page
@@ -278,14 +278,12 @@
   (let ((*standard-output* (knopf interactor)))
     (fresh-line)
     (if (components <frame>)
-	(loop
-	    initially (format t "Components available for inspection:~%")
-	    for cx being the hash-values in (components <frame>)
-	    for c = (car cx)
-	    do
-	      (present c 'component)
-	      (fresh-line))
-	(format t "No components compiled yet.~%"))))
+        (loop initially (format t "Components available for inspection:~%")
+              for cx being the hash-values in (components <frame>)
+              for c = (car cx)
+              do (present c 'component)
+                 (fresh-line))
+        (format t "No components compiled yet.~%"))))
 
 (defun draw-arrow-arc
     (stream from-object to-object x1 y1 x2 y2 &rest drawing-options)
@@ -405,17 +403,18 @@
   (window-clear (knopf interactor)))
 
 (defun irspect (&rest args &key width height background &allow-other-keys)
-  (if background
-      (clim-sys:make-process
-       (lambda ()
-	 (apply #'irspect :background nil args)))
-      (run-frame-top-level
-       (apply #'make-application-frame
-	      'irspect
-	      :allow-other-keys t
-	      :width (or width 800)
-	      :height (or height 600)
-	      args))))
+  (sb-c::with-compilation-values
+    (if background
+        (clim-sys:make-process
+         (lambda ()
+           (apply #'irspect :background nil args)))
+        (run-frame-top-level
+         (apply #'make-application-frame
+                'irspect
+                :allow-other-keys t
+                :width (or width 800)
+                :height (or height 600)
+                args)))))
 
 #+(or)
 (irspect:irspect)
