@@ -6,7 +6,8 @@
   (:menu-bar menubar-command-table)
   (:panes
     (interactor :interactor :scroll-bars t)
-    (source :drei :syntax :lisp))
+    (source :drei ;:syntax :lisp
+            ))
   (:layouts
     (default
       (clim-tab-layout:with-tab-layout ('clim-tab-layout:tab-page :name 'tabs)
